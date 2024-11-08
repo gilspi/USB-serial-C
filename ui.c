@@ -1,28 +1,40 @@
-#include <stdio.h>
-#include <windows.h>
 #include <process.h>
+#include <stdio.h>
+#include "ui.h"
 #include "serial.h"
+#include "utils.h"
 
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-/*
-Используется для обработки сообщений, поступающих в окно.
-Получает: дескриптор (окно, которое принимает сообщение), 
-          идентификатор сообщений (создание, уничтожение, перерисовка, обработка команды пользователя (нажатие кнопки)),
-          доп. парам клавиатуры (Код нажатой клавиши, ID кнопки), 
-          доп. парам. окна (координаты курсора, размер окна) 
-*/
-
-// Идентификаторы кнопок
-#define ID_BUTTON_SEND_ONCE 1
-#define ID_BUTTON_SEND_CONT 2
-#define ID_BUTTON_SEND_STOP 3
-#define ID_BUTTON_SEND_SPED 4
-
-HANDLE hSerial;
-const char *comPort = "\\\\.\\COM5";  // указываем нужный COM-порт
+/* идентификаторы кнопок */
+#define ID_BUTTON_CONNECT 1
+#define ID_COMBOBOX 2
+#define ID_BUTTON_SEND_ONCE 3
+#define ID_BUTTON_SEND_CONT 4
+#define ID_BUTTON_SEND_STOP 5
+#define ID_BUTTON_SEND_SPED 6
 
 
-// Функция для обработки кнопок
+extern HANDLE hSerial;
+
+
+void addAvailablePorts(HWND hComboBox) {
+    for (int i = 1; i <= 256; i++) {
+        char portName[10];
+        snprintf(portName, sizeof(portName), "COM%d", i);
+        HANDLE hPort = CreateFile(portName,
+                                  GENERIC_READ | GENERIC_WRITE,
+                                  0,
+                                  NULL,
+                                  OPEN_EXISTING,
+                                  0,
+                                  NULL);
+        if (hPort != INVALID_HANDLE_VALUE) {
+            SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)portName);
+            CloseHandle(hPort);
+        }
+    }
+}
+
+
 void handleButtonPress(int buttonID) {
     if (hSerial != INVALID_HANDLE_VALUE) {
         switch (buttonID) {
@@ -39,85 +51,81 @@ void handleButtonPress(int buttonID) {
                 writeToComPort(hSerial, "<MAsped>");
                 break;
         }
-    } else {
-        printf("COM порт не открыт!\n");
     }
 }
 
-// Основная функция окна
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    (void) hPrevInstance;
-    (void) lpCmdLine;
 
-    // Открываем COM порт
-    hSerial = CreateFile(comPort,
-                         GENERIC_READ | GENERIC_WRITE,
-                         0,
-                         NULL,
-                         OPEN_EXISTING,
-                         0,
-                         NULL);
-    if (hSerial == INVALID_HANDLE_VALUE) {
-        MessageBoxW(NULL, L"Не удалось открыть COM порт", L"Ошибка", MB_OK | MB_ICONERROR);
-        return 1;
-    }
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    static HWND hComboBox, hConnectButton;
 
-    configureComPort(hSerial, CBR_115200, 8, ONESTOPBIT, NOPARITY);  // настраиваем COM порт
-
-    _beginthreadex(NULL, 0, &read_from_port, hSerial, 0, NULL);  // запускаем поток для чтения
-
-    // Создаем окно и кнопки
-    WNDCLASS wc = { };
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = "ComPortWindowClass";
-
-    RegisterClass(&wc);
-
-    HWND hwnd = CreateWindowEx(0,
-                              "ComPortWindowClass",
-                              "MA GUI",
-                              WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                              CW_USEDEFAULT,
-                              CW_USEDEFAULT,
-                              220,
-                              320, NULL, NULL, hInstance, NULL
-    );
-    ShowWindow(hwnd, nCmdShow);
-
-    // Запуск цикла обработки сообщений
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    CloseHandle(hSerial);  // закрываем порт после завершения программы
-    return 0;
-}
-
-// Обработчик сообщений окна
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-        case WM_DESTROY:
-            PostQuitMessage(0);
-            return 0;
-
+    switch (msg) {
         case WM_CREATE:
-            CreateWindow("BUTTON", "<MAonce>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                         50, 50, 100, 30, hwnd, (HMENU) ID_BUTTON_SEND_ONCE, NULL, NULL);
-            CreateWindow("BUTTON", "<MAcont>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                         50, 100, 100, 30, hwnd, (HMENU) ID_BUTTON_SEND_CONT, NULL, NULL);
-            CreateWindow("BUTTON", "<MAstop>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                         50, 150, 100, 30, hwnd, (HMENU) ID_BUTTON_SEND_STOP, NULL, NULL);
-            CreateWindow("BUTTON", "<MAsped>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                         50, 200, 100, 30, hwnd, (HMENU) ID_BUTTON_SEND_SPED, NULL, NULL);
+            hComboBox = CreateWindow("COMBOBOX",
+                                     NULL,
+                                     WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                     50, 50, 200, 200, hwnd, (HMENU)ID_COMBOBOX, NULL, NULL);
+            addAvailablePorts(hComboBox);
+
+            hConnectButton = CreateWindow("BUTTON",
+                                          "CONNECT",
+                                          WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                                          50, 100, 100, 30, hwnd, (HMENU)ID_BUTTON_CONNECT, NULL, NULL);
+
+            CreateWindow("BUTTON",
+                         "<MAonce>",
+                         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                         50, 150, 100, 30, hwnd, (HMENU)ID_BUTTON_SEND_ONCE, NULL, NULL);
+            CreateWindow("BUTTON",
+                         "<MAcont>",
+                         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                         50, 200, 100, 30, hwnd, (HMENU)ID_BUTTON_SEND_CONT, NULL, NULL);
+            CreateWindow("BUTTON",
+                         "<MAstop>",
+                         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                         50, 250, 100, 30, hwnd, (HMENU)ID_BUTTON_SEND_STOP, NULL, NULL);
+            CreateWindow("BUTTON",
+                         "<MAsped>",
+                         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+                         50, 300, 100, 30, hwnd, (HMENU)ID_BUTTON_SEND_SPED, NULL, NULL);
             return 0;
 
         case WM_COMMAND:
-            handleButtonPress(LOWORD(wParam));  // Обработка нажатия кнопок
+            if (LOWORD(wParam) == ID_BUTTON_CONNECT) {
+                int itemIndex = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
+                char portName[10];
+                SendMessage(hComboBox, CB_GETLBTEXT, itemIndex, (LPARAM)portName);
+
+                if (hSerial == INVALID_HANDLE_VALUE) {
+                    hSerial = openSerialPort(portName);
+                    if (hSerial) {
+                        _beginthreadex(NULL, 0, &read_from_port, hSerial, 0, NULL);
+                        SetWindowText(GetDlgItem(hwnd, ID_BUTTON_CONNECT),
+                                      "DISCONNECT");
+                    }
+                } else {
+                    if (hSerial != INVALID_HANDLE_VALUE){
+                        CloseHandle(hSerial);
+
+                        MessageBoxW(NULL,
+                                   L"Разрыв соединения с COM",
+                                   L"Информация",
+                                   MB_OK | MB_ICONINFORMATION);
+                    }
+                    hSerial = INVALID_HANDLE_VALUE;
+                    SetWindowText(GetDlgItem(hwnd, ID_BUTTON_CONNECT), "CONNECT");
+                    SendMessage(hComboBox, CB_SETCURSEL, (WPARAM)-1, 0);
+                    clearConsole();
+                }
+            } else {
+                handleButtonPress(LOWORD(wParam));
+            }
+            return 0;
+
+        case WM_DESTROY:
+            PostQuitMessage(0);
             return 0;
     }
 
-    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
+
